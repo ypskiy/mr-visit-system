@@ -6,6 +6,8 @@
 
 - [🎥 点击查看系统演示视频](docs/assets/demo.mov)
 - [📝 查看开发过程 Prompt 历史记录](docs/assets/prompt-history.md)
+- [📖 查看 AI 协同开发报告](docs/assets/ai-development-report.md)
+
 
 
 ## 功能概览
