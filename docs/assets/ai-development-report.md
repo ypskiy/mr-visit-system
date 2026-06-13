@@ -39,26 +39,25 @@
 
 ## 2. AI 纠偏亮点案例
 
-在代码生成与集成阶段，通过自动化测试与容器化验证，人类工程师发现了 AI 生成的若干隐藏 Bug，并成功进行了引导和修复。
+在代码集成与联调阶段，我们本着“实事求是”的原则，通过自动化测试运行、Docker 容器日志监控以及人类工程师的实际 UI 体验，分别捕获并修复了以下三类 Bug：
 
 ### 🔍 案例一：SQLite 内存数据库异步测试中 `MissingGreenlet` 异常
-* **发现问题**：在执行 `pytest` 自动化测试时，由于测试环境使用的是 SQLite 内存库（通过 `aiosqlite`），而 FastAPI 应用层在提交拜访签退/报告后会调用 `session.commit()`，导致 SQLAlchemy 中的对象缓存过期。在 Pydantic 将 `Visit` 序列化为响应时，尝试懒加载关联的 `mr`、`doctor` 等关系属性，抛出了 `sqlalchemy.exc.MissingGreenlet: parent instance is not bound to a Session; lazy load operation cannot proceed` 异常。
-* **排查与修复**：工程师引导 AI 仔细分析 SQLAlchemy 在异步上下文下的关系加载机制。最终通过在服务层方法中对已提交的对象显式使用 `db.expunge(visit)`（将对象从 Session 剥离，保留已被加载的属性），或在 SQLAlchemy 查询中统一采用 `selectinload` 进行预加载（Eager Loading），彻底消除了异步懒加载报错，确保测试用例绿灯通过。
+* **发现与定位方式**：由**测试运行命令输出**捕获。在人类工程师允许运行 `pytest` 后，测试控制台抛出大量的 `sqlalchemy.exc.MissingGreenlet` 错误。
+* **排查与修复**：AI 针对异步 SQLite 在 `session.commit()` 后的懒加载过期行为进行分析，通过在服务层方法中使用 `db.expunge(visit)` 将对象从 Session 剥离，并在查询中显式引入 `selectinload` 进行关联属性的预加载，彻底消除了异步懒加载报错，确保全部 89 个测试用例顺利通过。
 
-### 🔍 案例二：Alembic 迁移在 PostgreSQL 下的 Enum 碰撞与 asyncpg 局限
-* **发现问题**：在 Docker Compose 启动 Postgres 并执行 Alembic 自动迁移时，由于 SQLAlchemy `Enum` 类型在 `create_table` 阶段会被隐式触发二次创建，导致抛出 `DuplicateObject` 异常；此外，`asyncpg` 驱动程序不支持在单个 `op.execute()` 块中执行以分号分隔的多条 SQL 语句，导致迁移中断。
-* **排查与修复**：工程师发现该问题后，对迁移逻辑进行了微调：
-  1. 将建表中的 `sa.Enum` 定义解耦，将 `visitstatus` 和 `complianceresult` 的生成拆分为独立的 `op.execute("CREATE TYPE ...")` 语句；
-  2. 为了兼顾 SQLite（不支持原生 Postgres ENUM）和 PostgreSQL，将底层的模型字段类型声明调整为通用的 `String` 并搭配 Check 约束，同时将多条 SQL 拆分至不同的 `op.execute` 块中执行，完美解决了一键部署的迁移死锁问题。
+### 🔍 案例二：Alembic 迁移在 PostgreSQL 下的 Enum 碰撞与 asyncpg 限制
+* **发现与定位方式**：由 **Docker Compose 启动日志**捕获。AI 在启动容器后主动查阅后台日志，捕获到了 Alembic 迁移在 Postgres 中重复创建 ENUM 以及 `asyncpg` 不支持在单个 `execute` 中运行多条 SQL 分隔符的错误。
+* **排查与修复**：AI 对迁移文件进行重构：将 ENUM 创建改为显式的独立 `op.execute`，并统一把模型字段类型设定为通用 `String` 以兼容 SQLite 测试。
 
 ### 🔍 案例三：拜访列表筛选“全部”选项时的 URL 拼接 Bug
-* **发现问题**：在前端点击“全部”状态标签筛选拜访列表时，页面上提示“加载错误”。
-* **排查与修复**：打开浏览器开发者工具，发现请求的 URL 变为了 `/api/v1/visits&limit=50`（因为 `currentStatus` 为空时，JavaScript 代码中粗暴地拼接了 `&limit=50`，导致缺少前面的问号 `?` 从而被 FastAPI 拦截抛出 422 校验错误）。工程师指出拼接逻辑缺陷后，将拼接逻辑重构为：
+* **发现与定位方式**：由**人类工程师通过 UI 操作直接发现**。工程师在体验拜访列表时，反馈了“拜访列表选择全部时候显示加载错误”的问题。
+* **排查与修复**：AI 顺着工程师指出的现象查阅 `list.html`，发现前端拼接 URL 时，若 status 过滤条件为空，URL 会错误地拼接成 `/api/v1/visits&limit=50`（缺失前面的 `?` 分隔符）。AI 随后将逻辑调整为：
   ```javascript
   const qs = currentStatus ? `?status=${currentStatus}` : '';
   const url = `/api/v1/visits${qs}${qs ? '&' : '?'}limit=50`;
   ```
-  修复后，过滤“全部”及各个具体状态时均可秒级响应。
+  修复后热重载生效，工程师刷新网页即可正常浏览。
+
 
 ---
 
