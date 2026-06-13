@@ -2,10 +2,11 @@
 
 > 医药代表（MR）学术拜访全生命周期管理平台
 
-## 系统演示
+## 项目资源
 
-演示视频已录制并保存在项目仓库中，可在本地或直接在 GitHub 播放：
-[🎥 点击查看系统演示视频](docs/assets/demo.mov)
+- [🎥 点击查看系统演示视频](docs/assets/demo.mov)
+- [📝 查看开发过程 Prompt 历史记录](docs/assets/prompt-history.md)
+
 
 ## 功能概览
 
