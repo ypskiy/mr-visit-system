@@ -2,6 +2,11 @@
 
 > 医药代表（MR）学术拜访全生命周期管理平台
 
+## 系统演示
+
+演示视频已录制并保存在项目仓库中，可在本地或直接在 GitHub 播放：
+[🎥 点击查看系统演示视频](docs/assets/demo.mov)
+
 ## 功能概览
 
 | 功能 | 描述 |
@@ -16,12 +21,13 @@
 ## 快速启动（Docker）
 
 ```bash
-git clone <repo>
+git clone https://github.com/ypskiy/mr-visit-system.git
 cd mr-visit-system
 docker-compose up --build
 ```
 
 访问 http://localhost:8000
+
 
 ## 技术栈
 
