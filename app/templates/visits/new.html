@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div style="max-width:640px;margin:0 auto;">
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">📅 新建拜访预约</h2>
+    </div>
+
+    <!-- Week guide -->
+    <div class="week-strip" id="week-strip-guide" style="margin-bottom:var(--sp-lg)">
+      📅 可预约范围（下周）：加载中...
+    </div>
+
+    <form id="new-visit-form">
+      <!-- Department -->
+      <div class="form-group">
+        <label class="form-label" for="dept-select">目标科室</label>
+        <select class="form-select" id="dept-select" required>
+          <option value="">— 请选择科室 —</option>
+        </select>
+        <div class="form-hint">选择科室后将自动筛选该科室医生</div>
+      </div>
+
+      <!-- Doctor (linked to dept) -->
+      <div class="form-group">
+        <label class="form-label" for="doctor-select">目标医生</label>
+        <select class="form-select" id="doctor-select" required disabled>
+          <option value="">— 请先选择科室 —</option>
+        </select>
+      </div>
+
+      <!-- Product -->
+      <div class="form-group">
+        <label class="form-label" for="product-select">计划讨论产品</label>
+        <select class="form-select" id="product-select" required>
+          <option value="">— 请选择产品 —</option>
+        </select>
+      </div>
+
+      <!-- Date & Time -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="visit-date">拜访日期</label>
+          <input type="date" class="form-input" id="visit-date" required>
+          <div class="form-hint" id="date-hint"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="visit-time">拜访时间</label>
+          <input type="time" class="form-input" id="visit-time" min="08:00" max="18:00" value="09:00" required>
+          <div class="form-hint">请选择 08:00–18:00 范围内的时间</div>
+        </div>
+      </div>
+
+      <!-- Error display -->
+      <div id="form-error" class="form-error" style="display:none;margin-bottom:var(--sp-md)"></div>
+
+      <!-- Actions -->
+      <div style="display:flex;gap:var(--sp-sm);justify-content:flex-end">
+        <a href="/" class="btn btn-secondary">取消</a>
+        <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
+          ➕ 创建预约
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async function () {
+  // Week range constraint
+  const { start, end } = window.getNextWeekRange();
+  const minDate = start.toISOString().slice(0, 10);
+  const maxDate = end.toISOString().slice(0, 10);
+
+  const dateInput = document.getElementById('visit-date');
+  dateInput.min = minDate;
+  dateInput.max = maxDate;
+  dateInput.value = minDate;
+
+  document.getElementById('week-strip-guide').innerHTML =
+    `📅 可预约范围（下周）：${window.fmtDateOnly(start)} ~ ${window.fmtDateOnly(end)}`;
+  document.getElementById('date-hint').textContent = `仅限 ${minDate} ~ ${maxDate}`;
+
+  // Load departments
+  try {
+    const depts = await window.api.get('/api/v1/departments');
+    const deptSelect = document.getElementById('dept-select');
+    depts.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = `${d.hospital_name} — ${d.name}`;
+      opt.dataset.lat = d.hospital_lat;
+      opt.dataset.lng = d.hospital_lng;
+      deptSelect.appendChild(opt);
+    });
+
+    // Dept → Doctor cascade
+    deptSelect.addEventListener('change', async () => {
+      const deptId = deptSelect.value;
+      const docSelect = document.getElementById('doctor-select');
+      docSelect.innerHTML = '<option value="">— 加载中... —</option>';
+      docSelect.disabled = true;
+
+      if (!deptId) {
+        docSelect.innerHTML = '<option value="">— 请先选择科室 —</option>';
+        return;
+      }
+
+      const doctors = await window.api.get(`/api/v1/doctors?department_id=${deptId}`);
+      docSelect.innerHTML = '<option value="">— 请选择医生 —</option>';
+      doctors.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = `${d.name}  ${d.title || ''}`;
+        docSelect.appendChild(opt);
+      });
+      docSelect.disabled = false;
+    });
+  } catch (e) {
+    window.toast.error('加载科室数据失败：' + e.message);
+  }
+
+  // Load products
+  try {
+    const products = await window.api.get('/api/v1/products');
+    const prodSelect = document.getElementById('product-select');
+    products.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.name}${p.generic_name ? '（' + p.generic_name + '）' : ''}`;
+      prodSelect.appendChild(opt);
+    });
+  } catch (e) {
+    window.toast.error('加载产品数据失败：' + e.message);
+  }
+
+  // Submit
+  document.getElementById('new-visit-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('form-error');
+    errEl.style.display = 'none';
+
+    const doctorId = document.getElementById('doctor-select').value;
+    const productId = document.getElementById('product-select').value;
+    const date = document.getElementById('visit-date').value;
+    const time = document.getElementById('visit-time').value;
+
+    if (!doctorId) { showError('请选择目标医生'); return; }
+    if (!productId) { showError('请选择计划讨论产品'); return; }
+
+    const plannedDate = new Date(`${date}T${time}:00+08:00`).toISOString();
+
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+
+    try {
+      const visit = await window.api.post('/api/v1/visits', {
+        doctor_id: doctorId,
+        product_id: productId,
+        planned_date: plannedDate,
+      });
+      window.toast.success('预约创建成功！');
+      setTimeout(() => location.href = `/visits/${visit.id}`, 800);
+    } catch (e) {
+      showError(e.message);
+      btn.disabled = false;
+      btn.textContent = '➕ 创建预约';
+    }
+  });
+
+  function showError(msg) {
+    const el = document.getElementById('form-error');
+    el.textContent = '⚠️ ' + msg;
+    el.style.display = 'block';
+  }
+})();
+</script>
+{% endblock %}

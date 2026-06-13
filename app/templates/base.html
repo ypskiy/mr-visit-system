@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title }} — MR拜访管理</title>
+  <meta name="description" content="医药代表学术拜访管理系统">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <div id="mr-id-meta" data-mr-id="{{ mr_id }}" style="display:none"></div>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">💊</div>
+      <div class="logo-text">
+        <div>MR 拜访管理</div>
+        <div class="logo-sub">学术拜访全程记录</div>
+      </div>
+    </div>
+
+    <div class="sidebar-nav">
+      <span class="nav-section-label">拜访管理</span>
+      <a href="/" class="nav-item {% if active_nav == 'visits' %}active{% endif %}">
+        <span class="nav-icon">📋</span>
+        <span>拜访列表</span>
+      </a>
+      <a href="/visits/new" class="nav-item {% if active_nav == 'new' %}active{% endif %}">
+        <span class="nav-icon">➕</span>
+        <span>新建预约</span>
+      </a>
+
+      <span class="nav-section-label">分析</span>
+      <a href="/compliance" class="nav-item {% if active_nav == 'compliance' %}active{% endif %}">
+        <span class="nav-icon">🛡️</span>
+        <span>合规概览</span>
+      </a>
+      <a href="/dashboard/products" class="nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
+        <span class="nav-icon">📦</span>
+        <span>产品看板</span>
+      </a>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="mr-card">
+        <div class="mr-avatar" id="sidebar-avatar">李</div>
+        <div class="mr-info">
+          <div class="mr-name" id="sidebar-mr-name">李明</div>
+          <div class="mr-role">医药代表 · 华东区</div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <header class="topbar">
+      <h1 class="topbar-title">{{ page_title }}</h1>
+      <div class="topbar-actions">
+        {% block topbar_actions %}{% endblock %}
+      </div>
+    </header>
+
+    <main class="page-body">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

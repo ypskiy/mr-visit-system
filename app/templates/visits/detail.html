@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a href="/" class="btn btn-secondary">← 返回列表</a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:760px;margin:0 auto;">
+  <!-- Loading -->
+  <div id="detail-loading" class="loading-overlay"><div class="spinner"></div></div>
+
+  <!-- Content (hidden until loaded) -->
+  <div id="detail-content" style="display:none">
+
+    <!-- Visit header card -->
+    <div class="card" style="margin-bottom:var(--sp-lg)">
+      <div class="card-header">
+        <div>
+          <div id="detail-doctor" style="font-size:20px;font-weight:700;color:var(--c-text)"></div>
+          <div id="detail-dept" style="font-size:13px;color:var(--c-text-3);margin-top:4px"></div>
+        </div>
+        <div style="text-align:right">
+          <div id="status-badge-wrap"></div>
+          <div id="compliance-badge-wrap" style="margin-top:6px"></div>
+        </div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="detail-item">
+          <div class="detail-label">讨论产品</div>
+          <div class="detail-value" id="detail-product"></div>
+        </div>
+        <div class="detail-item">
+          <div class="detail-label">计划时间</div>
+          <div class="detail-value" id="detail-planned"></div>
+        </div>
+        <div class="detail-item" id="detail-checkin-wrap" style="display:none">
+          <div class="detail-label">签到时间</div>
+          <div class="detail-value" id="detail-checkin"></div>
+        </div>
+        <div class="detail-item" id="detail-checkout-wrap" style="display:none">
+          <div class="detail-label">签退时间 / 停留时长</div>
+          <div class="detail-value" id="detail-checkout"></div>
+        </div>
+        <div class="detail-item" id="detail-gps-wrap" style="display:none">
+          <div class="detail-label">签到坐标</div>
+          <div class="detail-value font-mono" id="detail-gps"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live timer (CHECKED_IN only) -->
+    <div id="live-timer" style="display:none" class="live-timer">
+      <div class="timer-dot"></div>
+      <span class="timer-label">本次拜访已进行</span>
+      <span class="timer-value" id="timer-display">00:00:00</span>
+    </div>
+
+    <!-- GPS locating overlay (shown during checkin) -->
+    <div id="gps-locating" style="display:none;margin-bottom:var(--sp-lg)">
+      <div class="gps-locating card" style="justify-content:center;padding:var(--sp-lg)">
+        <div class="gps-spinner"></div>
+        <span>正在模拟GPS定位...</span>
+      </div>
+    </div>
+
+    <!-- Action panel -->
+    <div id="action-panel" class="action-panel" style="display:none">
+      <div class="action-panel-title" id="action-title"></div>
+      <div id="action-content"></div>
+    </div>
+
+    <!-- Report display (COMPLETED) -->
+    <div id="report-panel" style="display:none" class="card" style="margin-top:var(--sp-lg)">
+      <div class="card-header">
+        <span class="card-title">📝 拜访报告</span>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-item" style="grid-column:1/-1">
+          <div class="detail-label">谈话要点</div>
+          <div class="detail-value" id="rpt-talking" style="white-space:pre-wrap"></div>
+        </div>
+        <div class="detail-item" style="grid-column:1/-1">
+          <div class="detail-label">医生反馈</div>
+          <div class="detail-value" id="rpt-feedback" style="white-space:pre-wrap"></div>
+        </div>
+        <div class="detail-item">
+          <div class="detail-label">资料派发</div>
+          <div class="detail-value" id="rpt-materials"></div>
+        </div>
+        <div class="detail-item">
+          <div class="detail-label">提交时间</div>
+          <div class="detail-value" id="rpt-time"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Compliance result (COMPLETED) -->
+    <div id="compliance-panel" style="display:none">
+      <div class="compliance-result" id="compliance-result-box">
+        <div class="compliance-header">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--c-text-3);margin-bottom:4px">合规校验结果</div>
+            <div id="comp-result-label" style="font-size:18px;font-weight:700"></div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:11px;color:var(--c-text-3)">综合评分</div>
+            <div class="compliance-score" id="comp-score"></div>
+          </div>
+        </div>
+        <div id="comp-violations"></div>
+      </div>
+    </div>
+
+  </div><!-- /detail-content -->
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/gps-simulator.js"></script>
+<script>
+const VISIT_ID = '{{ visit_id }}';
+let visitData = null;
+let timerInterval = null;
+
+async function loadVisit() {
+  try {
+    const v = await window.api.get(`/api/v1/visits/${VISIT_ID}`);
+    visitData = v;
+    render(v);
+  } catch (e) {
+    document.getElementById('detail-loading').innerHTML =
+      `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">加载失败</div><div class="empty-sub">${e.message}</div></div>`;
+  }
+}
+
+function render(v) {
+  document.getElementById('detail-loading').style.display = 'none';
+  document.getElementById('detail-content').style.display = 'block';
+
+  // Header
+  document.getElementById('detail-doctor').textContent = v.doctor?.name || '—';
+  document.getElementById('detail-dept').textContent =
+    `${v.doctor?.title || ''} · ${v.doctor?.department_name || ''} · ${v.doctor?.hospital_name || ''}`;
+  document.getElementById('status-badge-wrap').innerHTML = window.statusBadge(v.status);
+  if (v.compliance) {
+    document.getElementById('compliance-badge-wrap').innerHTML = window.complianceBadge(v.compliance.result);
+  }
+
+  // Details
+  document.getElementById('detail-product').textContent =
+    `${v.product?.name || '—'}${v.product?.generic_name ? '（' + v.product.generic_name + '）' : ''}`;
+  document.getElementById('detail-planned').textContent = window.fmtDate(v.planned_date);
+
+  if (v.checkin_time) {
+    document.getElementById('detail-checkin').textContent = window.fmtDate(v.checkin_time);
+    document.getElementById('detail-checkin-wrap').style.display = '';
+    document.getElementById('detail-gps').textContent =
+      `${parseFloat(v.checkin_lat).toFixed(5)}, ${parseFloat(v.checkin_lng).toFixed(5)}`;
+    document.getElementById('detail-gps-wrap').style.display = '';
+  }
+
+  if (v.checkout_time) {
+    document.getElementById('detail-checkout').textContent =
+      `${window.fmtDate(v.checkout_time)} （${v.duration_minutes}分钟）`;
+    document.getElementById('detail-checkout-wrap').style.display = '';
+  }
+
+  // Live timer
+  if (v.status === 'CHECKED_IN') {
+    document.getElementById('live-timer').style.display = 'flex';
+    startTimer(new Date(v.checkin_time));
+  } else {
+    clearInterval(timerInterval);
+  }
+
+  // Action panel
+  renderActionPanel(v);
+
+  // Report
+  if (v.report) {
+    document.getElementById('report-panel').style.display = '';
+    document.getElementById('rpt-talking').textContent = v.report.talking_points || '—';
+    document.getElementById('rpt-feedback').textContent = v.report.doctor_feedback || '—';
+    document.getElementById('rpt-materials').textContent = v.report.materials_distributed
+      ? `✅ 已派发（${v.report.material_type || '—'}）` : '❌ 未派发';
+    document.getElementById('rpt-time').textContent = window.fmtDate(v.report.submitted_at);
+  }
+
+  // Compliance
+  if (v.compliance) {
+    const panel = document.getElementById('compliance-panel');
+    panel.style.display = '';
+    const box = document.getElementById('compliance-result-box');
+    box.className = `compliance-result ${v.compliance.result}`;
+    document.getElementById('comp-score').textContent = v.compliance.score;
+    document.getElementById('comp-result-label').textContent =
+      window.complianceLabel[v.compliance.result] || v.compliance.result;
+    renderViolations(v.compliance.violations || []);
+  }
+}
+
+function renderViolations(violations) {
+  const el = document.getElementById('comp-violations');
+  if (!violations.length) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--c-text-2);margin-top:var(--sp-sm)">✅ 所有合规规则均通过</div>';
+    return;
+  }
+  el.innerHTML = '<div style="font-size:12px;color:var(--c-text-3);margin-bottom:var(--sp-sm)">违规详情：</div>' +
+    violations.map(v => `
+      <div class="violation-item">
+        <span class="violation-badge ${v.severity}">${v.severity === 'MAJOR' ? '严重' : '轻微'}</span>
+        <span>${v.message}</span>
+      </div>`).join('');
+}
+
+function renderActionPanel(v) {
+  const panel = document.getElementById('action-panel');
+  const title = document.getElementById('action-title');
+  const content = document.getElementById('action-content');
+  panel.style.display = '';
+
+  if (v.status === 'PLANNED') {
+    title.textContent = '可执行操作';
+    content.innerHTML = `
+      <div style="display:flex;gap:var(--sp-sm);flex-wrap:wrap;align-items:center">
+        <button class="btn btn-success btn-lg" onclick="doCheckin()">📍 签到</button>
+        <a href="/visits/new" class="btn btn-secondary" style="display:none" id="edit-btn">✏️ 修改预约</a>
+        <button class="btn btn-danger" onclick="doDelete()">🗑️ 删除预约</button>
+      </div>
+      <div class="form-hint mt-sm">签到时将自动获取GPS坐标（模拟）</div>`;
+
+  } else if (v.status === 'CHECKED_IN') {
+    title.textContent = '可执行操作';
+    content.innerHTML = `
+      <button class="btn btn-warning btn-lg" onclick="doCheckout()">🔚 签退</button>
+      <div class="form-hint mt-sm">签退后将自动计算停留时长</div>`;
+
+  } else if (v.status === 'CHECKED_OUT') {
+    title.textContent = '填写拜访报告';
+    content.innerHTML = `
+      <div class="form-group">
+        <label class="form-label" for="r-talking">谈话要点 *</label>
+        <textarea class="form-textarea" id="r-talking" placeholder="请描述本次拜访的主要谈话内容（至少10字）..." rows="4"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="r-feedback">医生对药品的反馈 *</label>
+        <textarea class="form-textarea" id="r-feedback" placeholder="请记录医生对产品的意见、问题或兴趣点（至少10字）..." rows="4"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">学术资料派发</label>
+        <label class="checkbox-group">
+          <input type="checkbox" id="r-materials" onchange="toggleMaterialType()">
+          <span>本次拜访已派发合规学术资料</span>
+        </label>
+      </div>
+      <div class="form-group" id="material-type-group" style="display:none">
+        <label class="form-label" for="r-type">资料类型</label>
+        <select class="form-select" id="r-type">
+          <option value="文献复印件">文献复印件</option>
+          <option value="产品说明书">产品说明书</option>
+          <option value="学术会议摘要">学术会议摘要</option>
+        </select>
+      </div>
+      <div id="report-error" class="form-error" style="display:none"></div>
+      <div style="display:flex;gap:var(--sp-sm);justify-content:flex-end;margin-top:var(--sp-lg)">
+        <button class="btn btn-primary btn-lg" onclick="submitReport()">✅ 提交报告并完成拜访</button>
+      </div>`;
+
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+// ── Actions ───────────────────────────────────────────────────
+
+async function doCheckin() {
+  if (!visitData) return;
+  // Get hospital coords from departments
+  try {
+    const depts = await window.api.get('/api/v1/departments');
+    const hosp = depts.find(d => d.hospital_name === visitData.doctor?.hospital_name);
+    const lat = hosp?.hospital_lat || 31.2304;
+    const lng = hosp?.hospital_lng || 121.4737;
+
+    document.getElementById('gps-locating').style.display = '';
+    const actionPanel = document.getElementById('action-panel');
+    actionPanel.style.display = 'none';
+
+    window.GPSSimulator.acquireWithDelay(lat, lng, null, async (gps) => {
+      document.getElementById('gps-locating').style.display = 'none';
+      try {
+        const updated = await window.api.post(`/api/v1/visits/${VISIT_ID}/checkin`, {
+          latitude: gps.lat, longitude: gps.lng,
+        });
+        const label = window.GPSSimulator.scenarioLabels[gps.scenario];
+        window.toast.success(`签到成功！${label}，距医院约 ${gps.radius}m`);
+        visitData = updated;
+        render(updated);
+      } catch (e) {
+        actionPanel.style.display = '';
+        window.toast.error('签到失败：' + e.message);
+      }
+    }, 1500);
+  } catch (e) {
+    window.toast.error('操作失败：' + e.message);
+  }
+}
+
+async function doCheckout() {
+  try {
+    const updated = await window.api.post(`/api/v1/visits/${VISIT_ID}/checkout`);
+    window.toast.success(`签退成功！本次拜访共 ${updated.duration_minutes} 分钟`);
+    visitData = updated;
+    clearInterval(timerInterval);
+    render(updated);
+  } catch (e) {
+    window.toast.error('签退失败：' + e.message);
+  }
+}
+
+async function doDelete() {
+  if (!confirm('确认删除此预约？此操作不可撤销。')) return;
+  try {
+    await window.api.delete(`/api/v1/visits/${VISIT_ID}`);
+    window.toast.success('预约已删除');
+    setTimeout(() => location.href = '/', 800);
+  } catch (e) {
+    window.toast.error('删除失败：' + e.message);
+  }
+}
+
+async function submitReport() {
+  const talking = document.getElementById('r-talking')?.value?.trim();
+  const feedback = document.getElementById('r-feedback')?.value?.trim();
+  const materials = document.getElementById('r-materials')?.checked;
+  const materialType = materials ? document.getElementById('r-type')?.value : null;
+  const errEl = document.getElementById('report-error');
+
+  if (!talking || talking.length < 10) {
+    errEl.textContent = '⚠️ 谈话要点至少需要10个字'; errEl.style.display = ''; return;
+  }
+  if (!feedback || feedback.length < 10) {
+    errEl.textContent = '⚠️ 医生反馈至少需要10个字'; errEl.style.display = ''; return;
+  }
+  errEl.style.display = 'none';
+
+  try {
+    const updated = await window.api.post(`/api/v1/visits/${VISIT_ID}/report`, {
+      talking_points: talking,
+      doctor_feedback: feedback,
+      materials_distributed: materials,
+      material_type: materialType,
+    });
+    window.toast.success('报告提交成功！合规校验已完成。');
+    visitData = updated;
+    render(updated);
+  } catch (e) {
+    errEl.textContent = '⚠️ ' + e.message; errEl.style.display = '';
+  }
+}
+
+function toggleMaterialType() {
+  const checked = document.getElementById('r-materials')?.checked;
+  document.getElementById('material-type-group').style.display = checked ? '' : 'none';
+}
+
+// ── Timer ─────────────────────────────────────────────────────
+function startTimer(checkinTime) {
+  function update() {
+    const diff = Math.floor((Date.now() - checkinTime.getTime()) / 1000);
+    const h = String(Math.floor(diff / 3600)).padStart(2, '0');
+    const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+    const s = String(diff % 60).padStart(2, '0');
+    document.getElementById('timer-display').textContent = `${h}:${m}:${s}`;
+  }
+  update();
+  timerInterval = setInterval(update, 1000);
+}
+
+loadVisit();
+</script>
+{% endblock %}

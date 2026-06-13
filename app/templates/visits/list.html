@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a href="/visits/new" class="btn btn-primary">
+    <span>＋</span> 新建预约
+  </a>
+{% endblock %}
+
+{% block content %}
+<!-- Week strip -->
+<div class="week-strip" id="week-strip">
+  📅 正在加载周次信息...
+</div>
+
+<!-- Stat cards -->
+<div class="stat-grid" id="stat-grid">
+  <div class="stat-card cyan">
+    <div class="stat-label">本周预约</div>
+    <div class="stat-value" id="stat-planned">—</div>
+    <div class="stat-sub">计划中</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">进行中</div>
+    <div class="stat-value" id="stat-active">—</div>
+    <div class="stat-sub">已签到 / 待签退</div>
+  </div>
+  <div class="stat-card yellow">
+    <div class="stat-label">已完成</div>
+    <div class="stat-value" id="stat-completed">—</div>
+    <div class="stat-sub">本周已完成拜访</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-label">合规率</div>
+    <div class="stat-value" id="stat-compliance">—</div>
+    <div class="stat-sub">已完成拜访合规率</div>
+  </div>
+</div>
+
+<!-- Tab navigation -->
+<div class="tab-nav" id="tab-nav">
+  <button class="tab-btn active" data-status="">全部</button>
+  <button class="tab-btn" data-status="PLANNED">计划中</button>
+  <button class="tab-btn" data-status="CHECKED_IN">已签到</button>
+  <button class="tab-btn" data-status="CHECKED_OUT">已签退</button>
+  <button class="tab-btn" data-status="COMPLETED">已完成</button>
+</div>
+
+<!-- Visit list -->
+<div id="visit-list-wrap">
+  <div class="loading-overlay"><div class="spinner"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/app.js"></script>
+<script>
+(async function () {
+  // ── Week strip ───────────────────────────────────────────────
+  const { start, end } = window.getNextWeekRange();
+  document.getElementById('week-strip').innerHTML =
+    `📅 当前日期: ${window.fmtDateOnly(new Date())} &nbsp;|&nbsp; 可预约范围（下周）: ${window.fmtDateOnly(start)} ~ ${window.fmtDateOnly(end)}`;
+
+  // ── Tabs ─────────────────────────────────────────────────────
+  let currentStatus = '';
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentStatus = btn.dataset.status;
+      loadVisits();
+    });
+  });
+
+  // ── Load visits ───────────────────────────────────────────────
+  async function loadVisits() {
+    const wrap = document.getElementById('visit-list-wrap');
+    wrap.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+    try {
+      const url = currentStatus
+        ? `/api/v1/visits?status=${currentStatus}&limit=50`
+        : `/api/v1/visits?limit=50`;
+      const data = await window.api.get(url);
+      renderVisits(data.items, wrap);
+      updateStats(data.items);
+    } catch (e) {
+      wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">加载失败</div><div class="empty-sub">${e.message}</div></div>`;
+    }
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────
+  function updateStats(items) {
+    const all = items;
+    document.getElementById('stat-planned').textContent = all.filter(v => v.status === 'PLANNED').length;
+    document.getElementById('stat-active').textContent =
+      all.filter(v => v.status === 'CHECKED_IN' || v.status === 'CHECKED_OUT').length;
+    const completed = all.filter(v => v.status === 'COMPLETED');
+    document.getElementById('stat-completed').textContent = completed.length;
+    const compliant = completed.filter(v => v.compliance?.result === 'COMPLIANT').length;
+    document.getElementById('stat-compliance').textContent =
+      completed.length ? `${Math.round(compliant / completed.length * 100)}%` : '—';
+  }
+
+  // ── Render ────────────────────────────────────────────────────
+  function renderVisits(items, wrap) {
+    if (!items.length) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">📋</div>
+          <div class="empty-text">暂无拜访记录</div>
+          <div class="empty-sub">点击右上角「新建预约」开始规划本周拜访</div>
+        </div>`;
+      return;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'visit-list';
+
+    items.forEach(v => {
+      const card = document.createElement('div');
+      card.className = 'visit-card';
+      card.onclick = () => location.href = `/visits/${v.id}`;
+
+      const actionBtn = getActionBtn(v);
+
+      card.innerHTML = `
+        <div class="visit-card-info">
+          <div class="visit-card-doctor">
+            ${v.doctor?.name || '—'}
+            <span style="font-size:12px;font-weight:400;color:var(--c-text-3);margin-left:8px">
+              ${v.doctor?.title || ''} · ${v.doctor?.department_name || ''} · ${v.doctor?.hospital_name || ''}
+            </span>
+          </div>
+          <div class="visit-card-meta">
+            <span class="visit-card-product">💊 ${v.product?.name || '—'}</span>
+            <span>📅 ${window.fmtDate(v.planned_date)}</span>
+            ${v.duration_minutes != null ? `<span>⏱ ${v.duration_minutes}分钟</span>` : ''}
+          </div>
+        </div>
+        <div class="visit-card-actions">
+          ${window.statusBadge(v.status)}
+          ${v.compliance ? window.complianceBadge(v.compliance.result) : ''}
+          ${actionBtn}
+        </div>`;
+
+      // Stop event propagation on action buttons
+      card.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', e => e.stopPropagation());
+      });
+
+      list.appendChild(card);
+    });
+
+    wrap.innerHTML = '';
+    wrap.appendChild(list);
+  }
+
+  function getActionBtn(v) {
+    if (v.status === 'PLANNED') {
+      return `<button class="btn btn-success btn-sm" onclick="doCheckin('${v.id}')">签到</button>`;
+    }
+    if (v.status === 'CHECKED_IN') {
+      return `<button class="btn btn-warning btn-sm" onclick="doCheckout('${v.id}')">签退</button>`;
+    }
+    if (v.status === 'CHECKED_OUT') {
+      return `<a href="/visits/${v.id}" class="btn btn-secondary btn-sm">填写报告</a>`;
+    }
+    return '';
+  }
+
+  // ── Quick checkin from list ───────────────────────────────────
+  window.doCheckin = async function (visitId) {
+    // Fetch visit to get hospital coords
+    try {
+      const visit = await window.api.get(`/api/v1/visits/${visitId}`);
+      const dept = await window.api.get(`/api/v1/departments`);
+      // Find dept by matching hospital
+      const hosp = dept.find(d => d.hospital_name === visit.doctor?.hospital_name);
+      const lat = hosp?.hospital_lat || 31.2304;
+      const lng = hosp?.hospital_lng || 121.4737;
+
+      window.toast.info('正在获取GPS坐标...');
+      window.GPSSimulator.acquireWithDelay(lat, lng, null, async (gps) => {
+        try {
+          await window.api.post(`/api/v1/visits/${visitId}/checkin`, {
+            latitude: gps.lat,
+            longitude: gps.lng,
+          });
+          const label = window.GPSSimulator.scenarioLabels[gps.scenario];
+          window.toast.success(`签到成功！${label}，距医院约 ${gps.radius}m`);
+          loadVisits();
+        } catch (e) {
+          window.toast.error('签到失败：' + e.message);
+        }
+      });
+    } catch (e) {
+      window.toast.error('操作失败：' + e.message);
+    }
+  };
+
+  window.doCheckout = async function (visitId) {
+    try {
+      await window.api.post(`/api/v1/visits/${visitId}/checkout`);
+      window.toast.success('签退成功！请前往详情页填写拜访报告。');
+      loadVisits();
+    } catch (e) {
+      window.toast.error('签退失败：' + e.message);
+    }
+  };
+
+  loadVisits();
+})();
+</script>
+{% endblock %}

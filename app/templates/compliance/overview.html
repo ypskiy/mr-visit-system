@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<!-- Stats row -->
+<div class="stat-grid" style="margin-bottom:var(--sp-xl)">
+  <div class="stat-card green">
+    <div class="stat-label">近4周合规率</div>
+    <div class="stat-value" id="s-rate">—</div>
+    <div class="stat-sub">已完成拜访</div>
+  </div>
+  <div class="stat-card cyan">
+    <div class="stat-label">合规拜访</div>
+    <div class="stat-value" id="s-compliant">—</div>
+    <div class="stat-sub"></div>
+  </div>
+  <div class="stat-card yellow">
+    <div class="stat-label">轻微违规</div>
+    <div class="stat-value" id="s-minor">—</div>
+    <div class="stat-sub"></div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-label">严重违规</div>
+    <div class="stat-value" id="s-major">—</div>
+    <div class="stat-sub"></div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1.5fr 1fr;gap:var(--sp-lg);margin-bottom:var(--sp-lg)">
+  <!-- Trend chart -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">📈 近4周合规趋势</span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="trend-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Rule violation breakdown -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">📊 违规规则分布</span>
+    </div>
+    <div id="rule-breakdown" style="display:flex;flex-direction:column;gap:var(--sp-sm)">
+      <div class="loading-overlay"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Violations list -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">⚠️ 违规拜访列表</span>
+    <span id="violations-count" style="font-size:12px;color:var(--c-text-3)"></span>
+  </div>
+  <div id="violations-list">
+    <div class="loading-overlay"><div class="spinner"></div></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async function () {
+  let trendChart = null;
+
+  try {
+    const data = await window.api.get('/api/v1/stats/compliance');
+    const weeks = data.recent_weeks;
+
+    // Stat cards
+    const allTotal = weeks.reduce((a, w) => a + w.total, 0);
+    const allCompliant = weeks.reduce((a, w) => a + w.compliant, 0);
+    const allMinor = weeks.reduce((a, w) => a + w.minor, 0);
+    const allMajor = weeks.reduce((a, w) => a + w.major, 0);
+
+    document.getElementById('s-rate').textContent =
+      allTotal ? `${Math.round(allCompliant / allTotal * 100)}%` : '—';
+    document.getElementById('s-compliant').textContent = allCompliant;
+    document.getElementById('s-minor').textContent = allMinor;
+    document.getElementById('s-major').textContent = allMajor;
+
+    // Trend chart
+    const ctx = document.getElementById('trend-chart').getContext('2d');
+    trendChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: weeks.map(w => w.week_label),
+        datasets: [
+          {
+            label: '合规',
+            data: weeks.map(w => w.compliant),
+            backgroundColor: 'rgba(63,185,80,0.7)',
+            borderColor: 'rgba(63,185,80,1)',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+          {
+            label: '轻微违规',
+            data: weeks.map(w => w.minor),
+            backgroundColor: 'rgba(210,153,34,0.7)',
+            borderColor: 'rgba(210,153,34,1)',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+          {
+            label: '严重违规',
+            data: weeks.map(w => w.major),
+            backgroundColor: 'rgba(248,81,73,0.7)',
+            borderColor: 'rgba(248,81,73,1)',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#8b949e', font: { size: 11 } } },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+          y: { stacked: true, ticks: { color: '#8b949e' }, grid: { color: '#30363d' }, beginAtZero: true },
+        },
+      },
+    });
+
+    // Rule breakdown
+    const breakdown = document.getElementById('rule-breakdown');
+    const rules = data.rule_violation_counts;
+    const ruleEntries = Object.entries(rules).sort((a, b) => b[1] - a[1]);
+    const maxVal = ruleEntries[0]?.[1] || 1;
+
+    if (!ruleEntries.length) {
+      breakdown.innerHTML = '<div class="text-muted" style="font-size:13px;padding:var(--sp-md)">暂无违规记录 ✅</div>';
+    } else {
+      breakdown.innerHTML = ruleEntries.map(([name, count]) => `
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="color:var(--c-text-2)">${name}</span>
+            <span style="color:var(--c-major);font-weight:600">${count}</span>
+          </div>
+          <div style="background:var(--c-surface);border-radius:4px;height:6px;overflow:hidden">
+            <div style="background:var(--c-major);height:100%;width:${Math.round(count/maxVal*100)}%;border-radius:4px;transition:width 0.8s ease"></div>
+          </div>
+        </div>`).join('');
+    }
+
+    // Violations list
+    const vList = document.getElementById('violations-list');
+    document.getElementById('violations-count').textContent = `共 ${data.violations_list.length} 条`;
+
+    if (!data.violations_list.length) {
+      vList.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">暂无违规拜访</div></div>';
+    } else {
+      vList.innerHTML = `<div class="visit-list">${data.violations_list.map(v => `
+        <div class="visit-card" onclick="location.href='/visits/${v.id}'">
+          <div class="visit-card-info">
+            <div class="visit-card-doctor">
+              ${v.doctor?.name || '—'}
+              <span style="font-size:12px;font-weight:400;color:var(--c-text-3);margin-left:8px">
+                ${v.doctor?.department_name || ''} · ${v.doctor?.hospital_name || ''}
+              </span>
+            </div>
+            <div class="visit-card-meta">
+              <span class="visit-card-product">💊 ${v.product?.name || '—'}</span>
+              <span>📅 ${window.fmtDate(v.planned_date)}</span>
+              ${v.duration_minutes != null ? `<span>⏱ ${v.duration_minutes}分钟</span>` : ''}
+            </div>
+            ${v.compliance ? `<div style="margin-top:4px;font-size:12px;color:var(--c-major)">
+              ${(v.compliance.violations||[]).map(vv => `• ${vv.message}`).join('<br>')}
+            </div>` : ''}
+          </div>
+          <div class="visit-card-actions">
+            ${v.compliance ? window.complianceBadge(v.compliance.result) : ''}
+            <span style="font-size:18px;font-weight:700;color:${v.compliance?.result==='MAJOR_VIOLATION'?'var(--c-major)':'var(--c-minor)'}">
+              ${v.compliance?.score ?? '—'}
+            </span>
+          </div>
+        </div>`).join('')}</div>`;
+    }
+  } catch (e) {
+    window.toast.error('加载合规数据失败：' + e.message);
+  }
+})();
+</script>
+{% endblock %}

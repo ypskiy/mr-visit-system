@@ -1,0 +1,41 @@
+
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: mr_visit_db
+    environment:
+      POSTGRES_DB: mr_visit
+      POSTGRES_USER: mr_admin
+      POSTGRES_PASSWORD: mr_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mr_admin -d mr_visit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: mr_visit_app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mr_admin:mr_secret@db:5432/mr_visit
+      APP_ENV: development
+      DEFAULT_MR_ID: "00000000-0000-0000-0000-000000000001"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: >
+      sh -c "alembic upgrade head &&
+             python scripts/seed.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  pgdata:
